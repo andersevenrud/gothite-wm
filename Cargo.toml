@@ -1,0 +1,13 @@
+[project]
+name = "gothite-wm"
+version = "0.0.1"
+authors = ["Anders Evenrud <andersevenrud@gmail.com>"]
+
+[dependencies]
+x11 = { version = "2.18.1", features = ["xlib"] }
+log = "0.4"
+env_logger = "0.7.0"
+vector2d = "2.2.0"
+
+[[bin]]
+name = "gothite-wm"

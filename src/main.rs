@@ -8,6 +8,7 @@ extern crate log;
 extern crate x11;
 extern crate vector2d;
 
+use std::ffi::CString;
 use std::collections::HashMap;
 use std::mem::{zeroed, uninitialized};
 use std::os::raw::{c_void};
@@ -114,6 +115,102 @@ fn bind_window_key(_wm: &WindowManager, _w: xlib::Window, _k: u32, _m: u32) {
 }
 
 /**
+ * Resizes a window
+ */
+fn resize_window(_wm: &WindowManager, _w: xlib::Window, _win: &Window, delta: Vector2D<i32>) {
+    let new_dimension = _win.drag_start_size.as_i32s() + delta;
+    let new_dimension = Vector2D::new(
+        max(10, new_dimension.x),
+        max(10, new_dimension.y)
+    ).as_u32s();
+
+    unsafe {
+        xlib::XResizeWindow(_wm.display, _win.decoration,
+                            new_dimension.x + (DECORATION_PADDING * 2) as u32,
+                            new_dimension.y + (DECORATION_PADDING * 2) as u32);
+        xlib::XResizeWindow(_wm.display, _win.frame, new_dimension.x, new_dimension.y);
+        xlib::XResizeWindow(_wm.display, _w, new_dimension.x, new_dimension.y);
+    }
+}
+
+/**
+ * Moves a window
+ */
+fn move_window(_wm: &WindowManager, _w: xlib::Window, _win: &Window, delta: Vector2D<i32>) {
+    let new_position = _win.drag_start + delta;
+    let decoration_position = new_position - Vector2D::new(DECORATION_PADDING, DECORATION_PADDING);
+
+    unsafe {
+        xlib::XMoveWindow(_wm.display, _win.frame, new_position.x, new_position.y);
+        xlib::XMoveWindow(_wm.display, _win.decoration, decoration_position.x, decoration_position.y);
+    }
+}
+
+/**
+ * Checks if a window can be gracefully killed
+ */
+fn can_kill_window_gracefully(_wm: &mut WindowManager, _w: xlib::Window) -> bool {
+    let mut atoms: *mut xlib::Atom = unsafe { uninitialized() };
+    let mut atom_count: i32 = 0;
+
+    let result = unsafe {
+        xlib::XGetWMProtocols(_wm.display,
+                              _w,
+                              &mut atoms,
+                              &mut atom_count)
+    };
+
+    if result == 0 {
+        return false;
+    }
+
+    let wm_delete_window_str = CString::new("WM_DELETE_WINDOW").unwrap();
+    let delete_atom = unsafe { xlib::XInternAtom(_wm.display, wm_delete_window_str.as_ptr(), xlib::False) };
+
+    // FIXME There must me an alternative for a loop
+    for _i in 0..atom_count {
+        let v = unsafe { atoms.offset(_i as isize) };
+        if unsafe { *v == delete_atom } {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Kills a window
+ */
+fn kill_window(_wm: &mut WindowManager, _w: xlib::Window) {
+    if can_kill_window_gracefully(_wm, _w) {
+        let mut ev: xlib::XEvent = unsafe { uninitialized() };
+        let wm_protocols_str = CString::new("WM_PROTOCOLS").unwrap();
+        let wm_delete_window_str = CString::new("WM_DELETE_WINDOW").unwrap();
+
+        unsafe {
+            let wm_protocols = xlib::XInternAtom(_wm.display, wm_protocols_str.as_ptr(), xlib::False);
+            let wm_delete_window = xlib::XInternAtom(_wm.display, wm_delete_window_str.as_ptr(), xlib::False);
+
+            ev.client_message.type_ = xlib::ClientMessage;
+            ev.client_message.message_type = wm_protocols;
+            ev.client_message.window = _w;
+            ev.client_message.format = 32;
+            ev.client_message.data.set_long(0, wm_delete_window as i64);
+
+            xlib::XSendEvent(_wm.display, _w, xlib::False, 0, &mut ev);
+        }
+
+        debug!("Gracefully killed window");
+    } else {
+        unsafe {
+            xlib::XKillClient(_wm.display, _w);
+        }
+
+        debug!("Killed window");
+    }
+}
+
+/**
  * Removes a window frame
  */
 fn remove_window_frame(_wm: &mut WindowManager, _w: xlib::Window) {
@@ -131,16 +228,6 @@ fn remove_window_frame(_wm: &mut WindowManager, _w: xlib::Window) {
     }
 
     _wm.windows.remove(&_w);
-}
-
-/**
- * Kills a window
- */
-fn kill_window(_wm: &mut WindowManager, _w: xlib::Window) {
-    // TODO: Use WM_DELETE_WINDOW event
-    unsafe {
-        xlib::XKillClient(_wm.display, _w);
-    }
 }
 
 /**
@@ -222,7 +309,7 @@ fn on_unmap_notify(_wm: &mut WindowManager, _e: xlib::XUnmapEvent) {
     let win = _wm.windows.get(&_e.window).unwrap();
 
     unsafe {
-        // FIXME: This triggers an error
+        // FIXME This triggers an error
         xlib::XUnmapWindow(_wm.display, win.frame);
         xlib::XReparentWindow(_wm.display, _e.window, _wm.root, 0, 0);
         xlib::XRemoveFromSaveSet(_wm.display, _e.window);
@@ -263,29 +350,9 @@ fn on_motion_notify(_wm: &WindowManager, _e: xlib::XMotionEvent) {
     let delta =  position - _wm.drag_start;
 
     if _e.state & xlib::Button1Mask != 0 {
-        let new_position = win.drag_start + delta;
-        let decoration_position = new_position - Vector2D::new(DECORATION_PADDING, DECORATION_PADDING);
-
-        unsafe {
-            xlib::XMoveWindow(_wm.display, win.frame, new_position.x, new_position.y);
-            xlib::XMoveWindow(_wm.display, win.decoration, decoration_position.x, decoration_position.y);
-        }
+        move_window(_wm, _e.window, win, delta);
     } else if _e.state & xlib::Button3Mask != 0 {
-        let new_dimension = win.drag_start_size.as_i32s() + delta;
-        let new_dimension = Vector2D::new(
-            max(10, new_dimension.x),
-            max(10, new_dimension.y)
-        ).as_u32s();
-
-        info!("Resize to {} {}", new_dimension.x, new_dimension.y);
-
-        unsafe {
-            xlib::XResizeWindow(_wm.display, win.decoration,
-                                new_dimension.x + (DECORATION_PADDING * 2) as u32,
-                                new_dimension.y + (DECORATION_PADDING * 2) as u32);
-            xlib::XResizeWindow(_wm.display, win.frame, new_dimension.x, new_dimension.y);
-            xlib::XResizeWindow(_wm.display, _e.window, new_dimension.x, new_dimension.y);
-        }
+        resize_window(_wm, _e.window, win, delta);
     }
 }
 

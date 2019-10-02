@@ -11,6 +11,7 @@ extern crate vector2d;
 use std::collections::HashMap;
 use std::mem::{zeroed, uninitialized};
 use std::os::raw::{c_void};
+use std::cmp::{max};
 use std::ptr;
 use x11::xlib;
 use x11::keysym;
@@ -74,6 +75,41 @@ fn reparent_initial_windows(_wm: &mut WindowManager) {
 
         xlib::XFree(windows as *mut c_void);
         xlib::XUngrabServer(_wm.display);
+    }
+}
+
+/**
+ * Binds a input button to a window
+ */
+fn bind_window_button(_wm: &WindowManager, _w: xlib::Window, _b: u32, _m: u32) {
+    unsafe {
+        xlib::XGrabButton(
+            _wm.display,
+            _b,
+            _m,
+            _w,
+            0,
+            xlib::ButtonPressMask as u32 | xlib::ButtonReleaseMask as u32 | xlib::ButtonMotionMask as u32,
+            xlib::GrabModeAsync,
+            xlib::GrabModeAsync,
+            0,
+            0);
+    }
+}
+
+/**
+ * Binds a input key to a window
+ */
+fn bind_window_key(_wm: &WindowManager, _w: xlib::Window, _k: u32, _m: u32) {
+    unsafe {
+        xlib::XGrabKey(
+            _wm.display,
+            xlib::XKeysymToKeycode(_wm.display, _k as u64) as i32,
+            _m,
+            _w,
+            0,
+            xlib::GrabModeAsync,
+            xlib::GrabModeAsync);
     }
 }
 
@@ -144,26 +180,9 @@ fn create_window_frame(_wm: &mut WindowManager, _w: xlib::Window, early: bool) {
 
         xlib::XSelectInput(_wm.display, frame, xlib::SubstructureRedirectMask | xlib::SubstructureNotifyMask);
 
-        xlib::XGrabButton(
-            _wm.display,
-            xlib::Button1,
-            xlib::Mod1Mask,
-            _w,
-            0,
-            xlib::ButtonPressMask as u32 | xlib::ButtonReleaseMask as u32 | xlib::ButtonMotionMask as u32,
-            xlib::GrabModeAsync,
-            xlib::GrabModeAsync,
-            0,
-            0);
-
-        xlib::XGrabKey(
-            _wm.display,
-            xlib::XKeysymToKeycode(_wm.display, keysym::XK_F4 as u64) as i32,
-            xlib::Mod1Mask,
-            _w,
-            0,
-            xlib::GrabModeAsync,
-            xlib::GrabModeAsync);
+        bind_window_button(_wm, _w, xlib::Button1, xlib::Mod1Mask);
+        bind_window_button(_wm, _w, xlib::Button3, xlib::Mod1Mask);
+        bind_window_key(_wm, _w, keysym::XK_F4, xlib::Mod1Mask);
 
         xlib::XAddToSaveSet(_wm.display, _w);
         xlib::XReparentWindow(_wm.display, _w, frame, 0, 0);
@@ -173,8 +192,8 @@ fn create_window_frame(_wm: &mut WindowManager, _w: xlib::Window, early: bool) {
         _wm.windows.insert(_w, Window {
             frame: frame,
             decoration: decoration,
-            drag_start: Vector2D { x: 0, y: 0 },
-            drag_start_size: Vector2D { x: 0, y: 0 }
+            drag_start: Vector2D::new(0, 0),
+            drag_start_size: Vector2D::new(0, 0)
         });
     }
 }
@@ -240,16 +259,32 @@ fn on_motion_notify(_wm: &WindowManager, _e: xlib::XMotionEvent) {
     }
 
     let win = _wm.windows.get(&_e.window).unwrap();
-    let position = Vector2D { x: _e.x_root, y: _e.y_root };
+    let position = Vector2D::new(_e.x_root, _e.y_root);
     let delta =  position - _wm.drag_start;
 
     if _e.state & xlib::Button1Mask != 0 {
         let new_position = win.drag_start + delta;
-        let decoration_position = new_position - Vector2D { x: DECORATION_PADDING, y: DECORATION_PADDING };
+        let decoration_position = new_position - Vector2D::new(DECORATION_PADDING, DECORATION_PADDING);
 
         unsafe {
             xlib::XMoveWindow(_wm.display, win.frame, new_position.x, new_position.y);
             xlib::XMoveWindow(_wm.display, win.decoration, decoration_position.x, decoration_position.y);
+        }
+    } else if _e.state & xlib::Button3Mask != 0 {
+        let new_dimension = win.drag_start_size.as_i32s() + delta;
+        let new_dimension = Vector2D::new(
+            max(10, new_dimension.x),
+            max(10, new_dimension.y)
+        ).as_u32s();
+
+        info!("Resize to {} {}", new_dimension.x, new_dimension.y);
+
+        unsafe {
+            xlib::XResizeWindow(_wm.display, win.decoration,
+                                new_dimension.x + (DECORATION_PADDING * 2) as u32,
+                                new_dimension.y + (DECORATION_PADDING * 2) as u32);
+            xlib::XResizeWindow(_wm.display, win.frame, new_dimension.x, new_dimension.y);
+            xlib::XResizeWindow(_wm.display, _e.window, new_dimension.x, new_dimension.y);
         }
     }
 }
@@ -322,7 +357,7 @@ fn on_button_press(_wm: &mut WindowManager, _e: xlib::XButtonEvent) {
 
     _wm.drag_start = Vector2D { x: _e.x_root, y: _e.y_root };
     win.drag_start = Vector2D { x: x, y: y };
-    win.drag_start_size = Vector2D { x: w, y: h};
+    win.drag_start_size = Vector2D { x: w, y: h };
 }
 
 /**

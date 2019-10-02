@@ -38,7 +38,8 @@ DISPLAY=:3 xclock
 
 ## Controls
 
-* `ALT` + Pointer = Move window
+* `ALT` + `Button0` = Move window
+* `ALT` + `Button3` = Resize window
 * `ALT` + `F4` = Close window
 
 ## License

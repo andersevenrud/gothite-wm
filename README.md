@@ -41,6 +41,7 @@ DISPLAY=:3 xclock
 * `ALT` + `Button0` = Move window
 * `ALT` + `Button3` = Resize window
 * `ALT` + `F4` = Close window
+* `ALT` + `TAB` = Restack windows
 
 ## License
 

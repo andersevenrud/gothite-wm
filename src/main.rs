@@ -147,6 +147,28 @@ fn move_window(_wm: &WindowManager, _w: xlib::Window, _win: &Window, delta: Vect
 }
 
 /**
+ * Re-stacks window(s)
+ */
+fn restack_window(_wm: &mut WindowManager, _w: xlib::Window) {
+    if !_wm.windows.contains_key(&_w) {
+        return;
+    }
+
+    // FIXME There must be a better way
+    for val in _wm.windows.keys() {
+        if val != &_w {
+            let next = _wm.windows.get(val).unwrap();
+            unsafe {
+                xlib::XRaiseWindow(_wm.display, next.decoration);
+                xlib::XRaiseWindow(_wm.display, next.frame);
+                xlib::XSetInputFocus(_wm.display, next.frame, xlib::RevertToPointerRoot, xlib::CurrentTime);
+            }
+            break;
+        }
+    }
+}
+
+/**
  * Checks if a window can be gracefully killed
  */
 fn can_kill_window_gracefully(_wm: &mut WindowManager, _w: xlib::Window) -> bool {
@@ -167,7 +189,7 @@ fn can_kill_window_gracefully(_wm: &mut WindowManager, _w: xlib::Window) -> bool
     let wm_delete_window_str = CString::new("WM_DELETE_WINDOW").unwrap();
     let delete_atom = unsafe { xlib::XInternAtom(_wm.display, wm_delete_window_str.as_ptr(), xlib::False) };
 
-    // FIXME There must me an alternative for a loop
+    // FIXME There must be an alternative for a loop
     for _i in 0..atom_count {
         let v = unsafe { atoms.offset(_i as isize) };
         if unsafe { *v == delete_atom } {
@@ -270,6 +292,7 @@ fn create_window_frame(_wm: &mut WindowManager, _w: xlib::Window, early: bool) {
         bind_window_button(_wm, _w, xlib::Button1, xlib::Mod1Mask);
         bind_window_button(_wm, _w, xlib::Button3, xlib::Mod1Mask);
         bind_window_key(_wm, _w, keysym::XK_F4, xlib::Mod1Mask);
+        bind_window_key(_wm, _w, keysym::XK_Tab, xlib::Mod1Mask);
 
         xlib::XAddToSaveSet(_wm.display, _w);
         xlib::XReparentWindow(_wm.display, _w, frame, 0, 0);
@@ -419,6 +442,7 @@ fn on_button_press(_wm: &mut WindowManager, _e: xlib::XButtonEvent) {
     unsafe {
         let mut root: xlib::Window = uninitialized();
         xlib::XGetGeometry(_wm.display, win.frame, &mut root, &mut x, &mut y, &mut w, &mut h, &mut border, &mut depth);
+        xlib::XRaiseWindow(_wm.display, win.decoration);
         xlib::XRaiseWindow(_wm.display, win.frame);
     }
 
@@ -441,6 +465,8 @@ fn on_key_press(_wm: &mut WindowManager, _e: xlib::XKeyEvent) {
     if _e.state & xlib::Mod1Mask > 0 {
         if _e.keycode == unsafe { xlib::XKeysymToKeycode(_wm.display, keysym::XK_F4 as u64) as u32 } {
             kill_window(_wm, _e.window);
+        } else if _e.keycode == unsafe { xlib::XKeysymToKeycode(_wm.display, keysym::XK_Tab as u64) as u32 } {
+            restack_window(_wm, _e.window);
         }
     }
 }

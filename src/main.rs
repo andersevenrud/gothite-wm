@@ -610,6 +610,8 @@ fn main() {
     unsafe {
         xlib::XSelectInput(display, root, xlib::SubstructureRedirectMask | xlib::SubstructureNotifyMask);
         xlib::XSync(display, 0);
+        xlib::XSetWindowBackground(display, root, 0x000000);
+        xlib::XClearWindow(display, root);
     }
 
     let mut wm = WindowManager {

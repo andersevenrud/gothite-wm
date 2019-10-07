@@ -4,7 +4,7 @@ A simple Rust Window Manager.
 
 > gothite: a red or yellow or brown mineral; an oxide of iron that is a common constituent of rust.
 
-*This is a personal project created in an attempt to learn Rust and xlib. Not actually intended for usage and is missing a lot of features at the moment.*
+*This is a personal project created in an attempt to learn Rust, xlib and cairo. Not actually intended for usage and is missing a lot of features at the moment.*
 
 ## Installation
 

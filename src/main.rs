@@ -6,6 +6,7 @@
 #[macro_use]
 extern crate log;
 extern crate x11;
+extern crate cairo_sys;
 extern crate vector2d;
 
 use std::ffi::CString;
@@ -37,7 +38,8 @@ extern "C" fn error_handler(_display: *mut xlib::Display, _ev: *mut xlib::XError
  */
 struct Window {
     frame: xlib::Window,
-    decoration: xlib::Window,
+    decoration_surface: *mut cairo_sys::cairo_surface_t,
+    decoration_context: *mut cairo_sys::cairo_t,
     drag_start: Vector2D<i32>,
     drag_start_size: Vector2D<u32>
 }
@@ -125,11 +127,13 @@ fn resize_window(_wm: &WindowManager, _w: xlib::Window, _win: &Window, delta: Ve
     ).as_u32s();
 
     unsafe {
-        xlib::XResizeWindow(_wm.display, _win.decoration,
-                            new_dimension.x + (DECORATION_PADDING * 2) as u32,
-                            new_dimension.y + (DECORATION_PADDING * 2) as u32);
-        xlib::XResizeWindow(_wm.display, _win.frame, new_dimension.x, new_dimension.y);
+        let width = new_dimension.x + (DECORATION_PADDING as u32 * 2);
+        let height = new_dimension.y + (DECORATION_PADDING as u32 * 2);
+
+        xlib::XResizeWindow(_wm.display, _win.frame, width as u32, height as u32);
         xlib::XResizeWindow(_wm.display, _w, new_dimension.x, new_dimension.y);
+
+        cairo_sys::cairo_xlib_surface_set_size(_win.decoration_surface, width as i32, height as i32);
     }
 }
 
@@ -138,11 +142,9 @@ fn resize_window(_wm: &WindowManager, _w: xlib::Window, _win: &Window, delta: Ve
  */
 fn move_window(_wm: &WindowManager, _w: xlib::Window, _win: &Window, delta: Vector2D<i32>) {
     let new_position = _win.drag_start + delta;
-    let decoration_position = new_position - Vector2D::new(DECORATION_PADDING, DECORATION_PADDING);
 
     unsafe {
         xlib::XMoveWindow(_wm.display, _win.frame, new_position.x, new_position.y);
-        xlib::XMoveWindow(_wm.display, _win.decoration, decoration_position.x, decoration_position.y);
     }
 }
 
@@ -159,7 +161,6 @@ fn restack_window(_wm: &mut WindowManager, _w: xlib::Window) {
         if val != &_w {
             let next = _wm.windows.get(val).unwrap();
             unsafe {
-                xlib::XRaiseWindow(_wm.display, next.decoration);
                 xlib::XRaiseWindow(_wm.display, next.frame);
                 xlib::XSetInputFocus(_wm.display, next.frame, xlib::RevertToPointerRoot, xlib::CurrentTime);
             }
@@ -233,6 +234,41 @@ fn kill_window(_wm: &mut WindowManager, _w: xlib::Window) {
 }
 
 /**
+ * Renders a window decoration
+ */
+fn draw_window_decoration(_wm: &WindowManager, _w: xlib::Window, _ctx: *mut cairo_sys::cairo_t) {
+    // TODO: Solve flickering
+    unsafe {
+        let mut attrs: xlib::XWindowAttributes = uninitialized();
+        xlib::XGetWindowAttributes(_wm.display, _w, &mut attrs);
+
+        cairo_sys::cairo_set_source_rgb(_ctx, 1.0, 1.0, 1.0);
+        cairo_sys::cairo_paint(_ctx);
+
+        // Top
+        cairo_sys::cairo_move_to(_ctx, 0.0, 0.0);
+        cairo_sys::cairo_line_to(_ctx, attrs.width as f64, 0.0);
+
+        // Right
+        cairo_sys::cairo_move_to(_ctx, attrs.width as f64, 0.0);
+        cairo_sys::cairo_line_to(_ctx, attrs.width as f64, attrs.height as f64);
+
+        // Bottom
+        cairo_sys::cairo_move_to(_ctx, 0.0, attrs.height as f64);
+        cairo_sys::cairo_line_to(_ctx, attrs.width as f64, attrs.height as f64);
+
+        // Left
+        cairo_sys::cairo_move_to(_ctx, 0.0, 0.0);
+        cairo_sys::cairo_line_to(_ctx, 0.0, attrs.height as f64);
+
+        cairo_sys::cairo_set_source_rgb(_ctx, 0.0, 0.0, 1.0);
+        cairo_sys::cairo_fill_preserve(_ctx);
+        cairo_sys::cairo_set_line_width(_ctx, 5.0);
+        cairo_sys::cairo_stroke(_ctx);
+    }
+}
+
+/**
  * Removes a window frame
  */
 fn remove_window_frame(_wm: &mut WindowManager, _w: xlib::Window) {
@@ -242,7 +278,10 @@ fn remove_window_frame(_wm: &mut WindowManager, _w: xlib::Window) {
 
     let win = _wm.windows.get(&_w).unwrap();
     unsafe {
-        xlib::XUnmapWindow(_wm.display, win.decoration);
+        cairo_sys::cairo_surface_destroy(win.decoration_surface);
+        cairo_sys::cairo_destroy(win.decoration_context);
+        //cairo_sys::cairo_close_x11_surface(win.decoration_surface);
+
         xlib::XUnmapWindow(_wm.display, win.frame);
         xlib::XReparentWindow(_wm.display, _w, _wm.root, 0, 0);
         xlib::XRemoveFromSaveSet(_wm.display, _w);
@@ -265,29 +304,29 @@ fn create_window_frame(_wm: &mut WindowManager, _w: xlib::Window, early: bool) {
             return;
         }
 
-        let decoration = xlib::XCreateSimpleWindow(
-            _wm.display,
-            _wm.root,
-            attrs.x - DECORATION_PADDING,
-            attrs.y - DECORATION_PADDING,
-            (attrs.width + (DECORATION_PADDING * 2)) as u32,
-            (attrs.height + (DECORATION_PADDING * 2)) as u32,
-            0,
-            0xfff000,
-            0xfff000);
+        let screen = xlib::XDefaultScreen(_wm.display);
+        let visual = xlib::XDefaultVisual(_wm.display, screen);
+        let mut attributes: xlib::XSetWindowAttributes = uninitialized();
 
-        let frame = xlib::XCreateSimpleWindow(
+        attributes.background_pixel = xlib::XBlackPixel(_wm.display, screen);
+        attributes.border_pixel = xlib::XBlackPixel(_wm.display, screen);
+        attributes.event_mask = xlib::SubstructureRedirectMask | xlib::SubstructureNotifyMask | xlib::ExposureMask;
+
+        let depth = xlib::XDefaultDepth(_wm.display, screen);
+
+        let frame = xlib::XCreateWindow(
             _wm.display,
             _wm.root,
             attrs.x,
             attrs.y,
-            attrs.width as u32,
-            attrs.height as u32,
+            (attrs.width + (DECORATION_PADDING * 2)) as u32,
+            (attrs.height + (DECORATION_PADDING * 2)) as u32,
             0,
-            0xffffff,
-            0x000000);
-
-        xlib::XSelectInput(_wm.display, frame, xlib::SubstructureRedirectMask | xlib::SubstructureNotifyMask);
+            depth,
+            xlib::InputOutput as u32,
+            visual,
+            xlib::CWBackPixel | xlib::CWBorderPixel | xlib::CWEventMask,
+            &mut attributes);
 
         bind_window_button(_wm, _w, xlib::Button1, xlib::Mod1Mask);
         bind_window_button(_wm, _w, xlib::Button3, xlib::Mod1Mask);
@@ -295,16 +334,30 @@ fn create_window_frame(_wm: &mut WindowManager, _w: xlib::Window, early: bool) {
         bind_window_key(_wm, _w, keysym::XK_Tab, xlib::Mod1Mask);
 
         xlib::XAddToSaveSet(_wm.display, _w);
-        xlib::XReparentWindow(_wm.display, _w, frame, 0, 0);
-        xlib::XMapWindow(_wm.display, decoration);
+        xlib::XReparentWindow(_wm.display, _w, frame, DECORATION_PADDING, DECORATION_PADDING);
         xlib::XMapWindow(_wm.display, frame);
 
-        _wm.windows.insert(_w, Window {
+        info!("Created frame: {}", _w);
+
+        let surface = cairo_sys::cairo_xlib_surface_create(
+            _wm.display,
+            frame,
+            visual,
+            attrs.width + (DECORATION_PADDING * 2),
+            attrs.height + (DECORATION_PADDING * 2)
+        );
+
+        let context = cairo_sys::cairo_create(surface);
+
+        let _win = Window {
             frame: frame,
-            decoration: decoration,
+            decoration_surface: surface,
+            decoration_context: context,
             drag_start: Vector2D::new(0, 0),
             drag_start_size: Vector2D::new(0, 0)
-        });
+        };
+
+        _wm.windows.insert(_w, _win);
     }
 }
 
@@ -442,7 +495,6 @@ fn on_button_press(_wm: &mut WindowManager, _e: xlib::XButtonEvent) {
     unsafe {
         let mut root: xlib::Window = uninitialized();
         xlib::XGetGeometry(_wm.display, win.frame, &mut root, &mut x, &mut y, &mut w, &mut h, &mut border, &mut depth);
-        xlib::XRaiseWindow(_wm.display, win.decoration);
         xlib::XRaiseWindow(_wm.display, win.frame);
     }
 
@@ -476,6 +528,32 @@ fn on_key_press(_wm: &mut WindowManager, _e: xlib::XKeyEvent) {
  */
 fn on_key_release(_wm: &WindowManager, _e: xlib::XKeyEvent) {
     // Ignore for now
+}
+
+/**
+ * Handle expose event
+ */
+fn on_expose(_wm: &WindowManager, _e: xlib::XExposeEvent) {
+    // FIXME: There must be a better way to get the belonging window.
+    //        The one from the event is the "frame", not actual application window.
+    unsafe {
+        let mut parent: xlib::Window = uninitialized();
+        let mut root: xlib::Window = uninitialized();
+        let mut windows: *mut xlib::Window = uninitialized();
+        let mut count: u32 = 0;
+
+        if xlib::XQueryTree(_wm.display, _e.window, &mut root, &mut parent, &mut windows, &mut count) == 0 {
+            return;
+        }
+
+        if count > 0 {
+            let _w = windows.offset(0);
+            let win = _wm.windows.get(&*_w).unwrap();
+            draw_window_decoration(_wm, win.frame, win.decoration_context);
+        }
+
+        xlib::XFree(windows as *mut c_void);
+    }
 }
 
 /**
@@ -537,6 +615,7 @@ fn main() {
                 xlib::ButtonRelease => on_button_release(&wm, ev.button),
                 xlib::KeyPress => on_key_press(&mut wm, ev.key),
                 xlib::KeyRelease => on_key_release(&wm, ev.key),
+                xlib::Expose => on_expose(&wm, ev.expose),
 
                 xlib::MotionNotify => {
                     while xlib::XCheckTypedWindowEvent(display, ev.motion.window, xlib::MotionNotify, &mut ev) > 0 {

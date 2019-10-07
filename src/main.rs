@@ -21,6 +21,12 @@ use vector2d::Vector2D;
 
 const DECORATION_PADDING: i32 = 10;
 
+// These are not in the x11 crate
+// Taken from https://tronche.com/gui/x/xlib/appendix/b/
+const XC_ARROW: u32 = 2;
+const XC_CROSSHAIR: u32 = 34;
+const XC_FLEUR: u32 = 52;
+
 /**
  * The catch-all error reporter
  */
@@ -82,6 +88,18 @@ fn reparent_initial_windows(_wm: &mut WindowManager) {
 }
 
 /**
+ * Sets the window cursor
+ */
+fn set_window_cursor(_wm: &WindowManager, _w: xlib::Window, _c: u32) {
+    unsafe {
+        xlib::XDefineCursor(
+            _wm.display,
+            _w,
+            xlib::XCreateFontCursor(_wm.display, _c));
+    }
+}
+
+/**
  * Binds a input button to a window
  */
 fn bind_window_button(_wm: &WindowManager, _w: xlib::Window, _b: u32, _m: u32) {
@@ -135,17 +153,21 @@ fn resize_window(_wm: &WindowManager, _w: xlib::Window, _win: &Window, delta: Ve
 
         cairo_sys::cairo_xlib_surface_set_size(_win.decoration_surface, width as i32, height as i32);
     }
+
+    set_window_cursor(_wm, _win.frame, XC_FLEUR);
 }
 
 /**
  * Moves a window
  */
 fn move_window(_wm: &WindowManager, _w: xlib::Window, _win: &Window, delta: Vector2D<i32>) {
-    let new_position = _win.drag_start + delta;
+    let new_position = _win.drag_start +delta;
 
     unsafe {
         xlib::XMoveWindow(_wm.display, _win.frame, new_position.x, new_position.y);
     }
+
+    set_window_cursor(_wm, _win.frame, XC_CROSSHAIR);
 }
 
 /**
@@ -507,7 +529,12 @@ fn on_button_press(_wm: &mut WindowManager, _e: xlib::XButtonEvent) {
  * Handle button release event
  */
 fn on_button_release(_wm: &WindowManager, _e: xlib::XButtonEvent) {
-    // Ignore for now
+    if !_wm.windows.contains_key(&_e.window) {
+        return;
+    }
+
+    let win = _wm.windows.get(&_e.window).unwrap();
+    set_window_cursor(_wm, win.frame, XC_ARROW);
 }
 
 /**
@@ -593,6 +620,7 @@ fn main() {
     };
 
     reparent_initial_windows(&mut wm);
+    set_window_cursor(&wm, root, XC_ARROW);
 
     info!("Starting event loop");
 

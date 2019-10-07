@@ -5,19 +5,19 @@
 
 #[macro_use]
 extern crate log;
-extern crate x11;
 extern crate cairo_sys;
 extern crate vector2d;
+extern crate x11;
 
-use std::ffi::CString;
+use std::cmp::max;
 use std::collections::HashMap;
-use std::mem::{zeroed, uninitialized};
-use std::os::raw::{c_void};
-use std::cmp::{max};
+use std::ffi::CString;
+use std::mem::{uninitialized};
+use std::os::raw::c_void;
 use std::ptr;
-use x11::xlib;
-use x11::keysym;
 use vector2d::Vector2D;
+use x11::keysym;
+use x11::xlib;
 
 const DECORATION_PADDING: i32 = 10;
 
@@ -47,7 +47,7 @@ struct Window {
     decoration_surface: *mut cairo_sys::cairo_surface_t,
     decoration_context: *mut cairo_sys::cairo_t,
     drag_start: Vector2D<i32>,
-    drag_start_size: Vector2D<u32>
+    drag_start_size: Vector2D<u32>,
 }
 
 /**
@@ -57,7 +57,7 @@ struct WindowManager {
     display: *mut xlib::Display,
     root: xlib::Window,
     windows: HashMap<xlib::Window, Window>,
-    drag_start: Vector2D<i32>
+    drag_start: Vector2D<i32>,
 }
 
 /**
@@ -72,7 +72,14 @@ fn reparent_initial_windows(_wm: &mut WindowManager) {
         let mut windows: *mut xlib::Window = uninitialized();
         let mut count: u32 = 0;
 
-        xlib::XQueryTree(_wm.display, _wm.root, &mut root, &mut parent, &mut windows, &mut count);
+        xlib::XQueryTree(
+            _wm.display,
+            _wm.root,
+            &mut root,
+            &mut parent,
+            &mut windows,
+            &mut count,
+        );
 
         if root == _wm.root {
             debug!("Reparenting {} windows", count);
@@ -92,10 +99,7 @@ fn reparent_initial_windows(_wm: &mut WindowManager) {
  */
 fn set_window_cursor(_wm: &WindowManager, _w: xlib::Window, _c: u32) {
     unsafe {
-        xlib::XDefineCursor(
-            _wm.display,
-            _w,
-            xlib::XCreateFontCursor(_wm.display, _c));
+        xlib::XDefineCursor(_wm.display, _w, xlib::XCreateFontCursor(_wm.display, _c));
     }
 }
 
@@ -110,11 +114,14 @@ fn bind_window_button(_wm: &WindowManager, _w: xlib::Window, _b: u32, _m: u32) {
             _m,
             _w,
             0,
-            xlib::ButtonPressMask as u32 | xlib::ButtonReleaseMask as u32 | xlib::ButtonMotionMask as u32,
+            xlib::ButtonPressMask as u32
+                | xlib::ButtonReleaseMask as u32
+                | xlib::ButtonMotionMask as u32,
             xlib::GrabModeAsync,
             xlib::GrabModeAsync,
             0,
-            0);
+            0,
+        );
     }
 }
 
@@ -130,7 +137,8 @@ fn bind_window_key(_wm: &WindowManager, _w: xlib::Window, _k: u32, _m: u32) {
             _w,
             0,
             xlib::GrabModeAsync,
-            xlib::GrabModeAsync);
+            xlib::GrabModeAsync,
+        );
     }
 }
 
@@ -139,10 +147,7 @@ fn bind_window_key(_wm: &WindowManager, _w: xlib::Window, _k: u32, _m: u32) {
  */
 fn resize_window(_wm: &WindowManager, _w: xlib::Window, _win: &Window, delta: Vector2D<i32>) {
     let new_dimension = _win.drag_start_size.as_i32s() + delta;
-    let new_dimension = Vector2D::new(
-        max(10, new_dimension.x),
-        max(10, new_dimension.y)
-    ).as_u32s();
+    let new_dimension = Vector2D::new(max(10, new_dimension.x), max(10, new_dimension.y)).as_u32s();
 
     unsafe {
         let width = new_dimension.x + (DECORATION_PADDING as u32 * 2);
@@ -151,7 +156,11 @@ fn resize_window(_wm: &WindowManager, _w: xlib::Window, _win: &Window, delta: Ve
         xlib::XResizeWindow(_wm.display, _win.frame, width as u32, height as u32);
         xlib::XResizeWindow(_wm.display, _w, new_dimension.x, new_dimension.y);
 
-        cairo_sys::cairo_xlib_surface_set_size(_win.decoration_surface, width as i32, height as i32);
+        cairo_sys::cairo_xlib_surface_set_size(
+            _win.decoration_surface,
+            width as i32,
+            height as i32,
+        );
     }
 
     set_window_cursor(_wm, _win.frame, XC_FLEUR);
@@ -161,7 +170,7 @@ fn resize_window(_wm: &WindowManager, _w: xlib::Window, _win: &Window, delta: Ve
  * Moves a window
  */
 fn move_window(_wm: &WindowManager, _w: xlib::Window, _win: &Window, delta: Vector2D<i32>) {
-    let new_position = _win.drag_start +delta;
+    let new_position = _win.drag_start + delta;
 
     unsafe {
         xlib::XMoveWindow(_wm.display, _win.frame, new_position.x, new_position.y);
@@ -184,7 +193,12 @@ fn restack_window(_wm: &mut WindowManager, _w: xlib::Window) {
             let next = _wm.windows.get(val).unwrap();
             unsafe {
                 xlib::XRaiseWindow(_wm.display, next.frame);
-                xlib::XSetInputFocus(_wm.display, next.frame, xlib::RevertToPointerRoot, xlib::CurrentTime);
+                xlib::XSetInputFocus(
+                    _wm.display,
+                    next.frame,
+                    xlib::RevertToPointerRoot,
+                    xlib::CurrentTime,
+                );
             }
             break;
         }
@@ -198,19 +212,15 @@ fn can_kill_window_gracefully(_wm: &mut WindowManager, _w: xlib::Window) -> bool
     let mut atoms: *mut xlib::Atom = unsafe { uninitialized() };
     let mut atom_count: i32 = 0;
 
-    let result = unsafe {
-        xlib::XGetWMProtocols(_wm.display,
-                              _w,
-                              &mut atoms,
-                              &mut atom_count)
-    };
+    let result = unsafe { xlib::XGetWMProtocols(_wm.display, _w, &mut atoms, &mut atom_count) };
 
     if result == 0 {
         return false;
     }
 
     let wm_delete_window_str = CString::new("WM_DELETE_WINDOW").unwrap();
-    let delete_atom = unsafe { xlib::XInternAtom(_wm.display, wm_delete_window_str.as_ptr(), xlib::False) };
+    let delete_atom =
+        unsafe { xlib::XInternAtom(_wm.display, wm_delete_window_str.as_ptr(), xlib::False) };
 
     // FIXME There must be an alternative for a loop
     for _i in 0..atom_count {
@@ -233,8 +243,10 @@ fn kill_window(_wm: &mut WindowManager, _w: xlib::Window) {
         let wm_delete_window_str = CString::new("WM_DELETE_WINDOW").unwrap();
 
         unsafe {
-            let wm_protocols = xlib::XInternAtom(_wm.display, wm_protocols_str.as_ptr(), xlib::False);
-            let wm_delete_window = xlib::XInternAtom(_wm.display, wm_delete_window_str.as_ptr(), xlib::False);
+            let wm_protocols =
+                xlib::XInternAtom(_wm.display, wm_protocols_str.as_ptr(), xlib::False);
+            let wm_delete_window =
+                xlib::XInternAtom(_wm.display, wm_delete_window_str.as_ptr(), xlib::False);
 
             ev.client_message.type_ = xlib::ClientMessage;
             ev.client_message.message_type = wm_protocols;
@@ -328,13 +340,13 @@ fn create_window_frame(_wm: &mut WindowManager, _w: xlib::Window, early: bool) {
 
         let screen = xlib::XDefaultScreen(_wm.display);
         let visual = xlib::XDefaultVisual(_wm.display, screen);
-        let mut attributes: xlib::XSetWindowAttributes = uninitialized();
+        let depth = xlib::XDefaultDepth(_wm.display, screen);
 
+        let mut attributes: xlib::XSetWindowAttributes = uninitialized();
         attributes.background_pixel = xlib::XBlackPixel(_wm.display, screen);
         attributes.border_pixel = xlib::XBlackPixel(_wm.display, screen);
-        attributes.event_mask = xlib::SubstructureRedirectMask | xlib::SubstructureNotifyMask | xlib::ExposureMask;
-
-        let depth = xlib::XDefaultDepth(_wm.display, screen);
+        attributes.event_mask =
+            xlib::SubstructureRedirectMask | xlib::SubstructureNotifyMask | xlib::ExposureMask;
 
         let frame = xlib::XCreateWindow(
             _wm.display,
@@ -348,7 +360,8 @@ fn create_window_frame(_wm: &mut WindowManager, _w: xlib::Window, early: bool) {
             xlib::InputOutput as u32,
             visual,
             xlib::CWBackPixel | xlib::CWBorderPixel | xlib::CWEventMask,
-            &mut attributes);
+            &mut attributes,
+        );
 
         bind_window_button(_wm, _w, xlib::Button1, 0);
         bind_window_button(_wm, _w, xlib::Button1, xlib::Mod1Mask);
@@ -358,7 +371,13 @@ fn create_window_frame(_wm: &mut WindowManager, _w: xlib::Window, early: bool) {
         bind_window_key(_wm, _w, keysym::XK_Tab, xlib::Mod1Mask);
 
         xlib::XAddToSaveSet(_wm.display, _w);
-        xlib::XReparentWindow(_wm.display, _w, frame, DECORATION_PADDING, DECORATION_PADDING);
+        xlib::XReparentWindow(
+            _wm.display,
+            _w,
+            frame,
+            DECORATION_PADDING,
+            DECORATION_PADDING,
+        );
         xlib::XMapWindow(_wm.display, frame);
 
         info!("Created frame: {}", _w);
@@ -368,7 +387,7 @@ fn create_window_frame(_wm: &mut WindowManager, _w: xlib::Window, early: bool) {
             frame,
             visual,
             attrs.width + (DECORATION_PADDING * 2),
-            attrs.height + (DECORATION_PADDING * 2)
+            attrs.height + (DECORATION_PADDING * 2),
         );
 
         let context = cairo_sys::cairo_create(surface);
@@ -378,7 +397,7 @@ fn create_window_frame(_wm: &mut WindowManager, _w: xlib::Window, early: bool) {
             decoration_surface: surface,
             decoration_context: context,
             drag_start: Vector2D::new(0, 0),
-            drag_start_size: Vector2D::new(0, 0)
+            drag_start_size: Vector2D::new(0, 0),
         };
 
         _wm.windows.insert(_w, _win);
@@ -447,7 +466,7 @@ fn on_motion_notify(_wm: &WindowManager, _e: xlib::XMotionEvent) {
 
     let win = _wm.windows.get(&_e.window).unwrap();
     let position = Vector2D::new(_e.x_root, _e.y_root);
-    let delta =  position - _wm.drag_start;
+    let delta = position - _wm.drag_start;
 
     if _e.state & xlib::Button1Mask != 0 {
         move_window(_wm, _e.window, win, delta);
@@ -467,7 +486,7 @@ fn on_configure_notify(_wm: &WindowManager, _e: xlib::XConfigureEvent) {
  * Handle configuration request event
  */
 fn on_configure_request(_wm: &WindowManager, _e: xlib::XConfigureRequestEvent) {
-    let mut changes: xlib::XWindowChanges = unsafe { zeroed() };
+    let mut changes: xlib::XWindowChanges = unsafe { uninitialized() };
     changes.x = _e.x;
     changes.y = _e.y;
     changes.width = _e.width;
@@ -518,11 +537,24 @@ fn on_button_press(_wm: &mut WindowManager, _e: xlib::XButtonEvent) {
 
     unsafe {
         let mut root: xlib::Window = uninitialized();
-        xlib::XGetGeometry(_wm.display, win.frame, &mut root, &mut x, &mut y, &mut w, &mut h, &mut border, &mut depth);
+        xlib::XGetGeometry(
+            _wm.display,
+            win.frame,
+            &mut root,
+            &mut x,
+            &mut y,
+            &mut w,
+            &mut h,
+            &mut border,
+            &mut depth,
+        );
         xlib::XRaiseWindow(_wm.display, win.frame);
     }
 
-    _wm.drag_start = Vector2D { x: _e.x_root, y: _e.y_root };
+    _wm.drag_start = Vector2D {
+        x: _e.x_root,
+        y: _e.y_root,
+    };
     win.drag_start = Vector2D { x: x, y: y };
     win.drag_start_size = Vector2D { x: w, y: h };
 }
@@ -544,9 +576,12 @@ fn on_button_release(_wm: &WindowManager, _e: xlib::XButtonEvent) {
  */
 fn on_key_press(_wm: &mut WindowManager, _e: xlib::XKeyEvent) {
     if _e.state & xlib::Mod1Mask > 0 {
-        if _e.keycode == unsafe { xlib::XKeysymToKeycode(_wm.display, keysym::XK_F4 as u64) as u32 } {
+        if _e.keycode == unsafe { xlib::XKeysymToKeycode(_wm.display, keysym::XK_F4 as u64) as u32 }
+        {
             kill_window(_wm, _e.window);
-        } else if _e.keycode == unsafe { xlib::XKeysymToKeycode(_wm.display, keysym::XK_Tab as u64) as u32 } {
+        } else if _e.keycode
+            == unsafe { xlib::XKeysymToKeycode(_wm.display, keysym::XK_Tab as u64) as u32 }
+        {
             restack_window(_wm, _e.window);
         }
     } else {
@@ -577,7 +612,15 @@ fn on_expose(_wm: &WindowManager, _e: xlib::XExposeEvent) {
         let mut windows: *mut xlib::Window = uninitialized();
         let mut count: u32 = 0;
 
-        if xlib::XQueryTree(_wm.display, _e.window, &mut root, &mut parent, &mut windows, &mut count) == 0 {
+        if xlib::XQueryTree(
+            _wm.display,
+            _e.window,
+            &mut root,
+            &mut parent,
+            &mut windows,
+            &mut count,
+        ) == 0
+        {
             return;
         }
 
@@ -616,7 +659,11 @@ fn main() {
     let root = unsafe { xlib::XRootWindowOfScreen(screen) };
 
     unsafe {
-        xlib::XSelectInput(display, root, xlib::SubstructureRedirectMask | xlib::SubstructureNotifyMask);
+        xlib::XSelectInput(
+            display,
+            root,
+            xlib::SubstructureRedirectMask | xlib::SubstructureNotifyMask,
+        );
         xlib::XSync(display, 0);
         xlib::XSetWindowBackground(display, root, 0x000000);
         xlib::XClearWindow(display, root);
@@ -626,7 +673,7 @@ fn main() {
         display: display,
         root: root,
         windows: HashMap::new(),
-        drag_start: Vector2D { x: 0, y: 0 }
+        drag_start: Vector2D { x: 0, y: 0 },
     };
 
     reparent_initial_windows(&mut wm);
@@ -656,12 +703,18 @@ fn main() {
                 xlib::Expose => on_expose(&wm, ev.expose),
 
                 xlib::MotionNotify => {
-                    while xlib::XCheckTypedWindowEvent(display, ev.motion.window, xlib::MotionNotify, &mut ev) > 0 {
+                    while xlib::XCheckTypedWindowEvent(
+                        display,
+                        ev.motion.window,
+                        xlib::MotionNotify,
+                        &mut ev,
+                    ) > 0
+                    {
                         // Skip pending motion evets
                     }
 
                     on_motion_notify(&wm, ev.motion);
-                },
+                }
 
                 _ => {
                     info!("Did not handle event of type {}", ev.get_type());

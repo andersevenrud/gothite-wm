@@ -350,8 +350,10 @@ fn create_window_frame(_wm: &mut WindowManager, _w: xlib::Window, early: bool) {
             xlib::CWBackPixel | xlib::CWBorderPixel | xlib::CWEventMask,
             &mut attributes);
 
+        bind_window_button(_wm, _w, xlib::Button1, 0);
         bind_window_button(_wm, _w, xlib::Button1, xlib::Mod1Mask);
         bind_window_button(_wm, _w, xlib::Button3, xlib::Mod1Mask);
+        bind_window_button(_wm, _w, xlib::Button3, 0);
         bind_window_key(_wm, _w, keysym::XK_F4, xlib::Mod1Mask);
         bind_window_key(_wm, _w, keysym::XK_Tab, xlib::Mod1Mask);
 
@@ -546,6 +548,12 @@ fn on_key_press(_wm: &mut WindowManager, _e: xlib::XKeyEvent) {
             kill_window(_wm, _e.window);
         } else if _e.keycode == unsafe { xlib::XKeysymToKeycode(_wm.display, keysym::XK_Tab as u64) as u32 } {
             restack_window(_wm, _e.window);
+        }
+    } else {
+        if _e.window != _wm.root {
+            unsafe {
+                xlib::XRaiseWindow(_wm.display, _e.window);
+            }
         }
     }
 }

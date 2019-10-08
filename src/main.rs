@@ -435,10 +435,12 @@ fn on_motion_notify(_wm: &WindowManager, _e: xlib::XMotionEvent) {
     let position = Vector2D::new(_e.x_root, _e.y_root);
     let delta = position - _wm.drag_start;
 
-    if _e.state & xlib::Button1Mask != 0 {
-        move_window(_wm, _e.window, win, delta);
-    } else if _e.state & xlib::Button3Mask != 0 {
-        resize_window(_wm, _e.window, win, delta);
+    if _e.state & xlib::Mod1Mask != 0 {
+        if _e.state & xlib::Button1Mask != 0 {
+            move_window(_wm, _e.window, win, delta);
+        } else if _e.state & xlib::Button3Mask != 0 {
+            resize_window(_wm, _e.window, win, delta);
+        }
     }
 }
 
@@ -640,10 +642,8 @@ fn main() {
             xlib::SubstructureRedirectMask | xlib::SubstructureNotifyMask,
         );
         xlib::XSync(display, 0);
-        /*
         xlib::XSetWindowBackground(display, root, 0x000000);
         xlib::XClearWindow(display, root);
-        */
     }
 
     let mut wm = WindowManager {

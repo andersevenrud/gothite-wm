@@ -12,7 +12,7 @@ extern crate x11;
 use std::cmp::max;
 use std::collections::HashMap;
 use std::ffi::CString;
-use std::mem::{uninitialized};
+use std::mem::uninitialized;
 use std::os::raw::c_void;
 use std::ptr;
 use vector2d::Vector2D;
@@ -58,6 +58,7 @@ struct WindowManager {
     root: xlib::Window,
     windows: HashMap<xlib::Window, Window>,
     drag_start: Vector2D<i32>,
+    active_window: *const Window,
 }
 
 /**
@@ -100,45 +101,6 @@ fn reparent_initial_windows(_wm: &mut WindowManager) {
 fn set_window_cursor(_wm: &WindowManager, _w: xlib::Window, _c: u32) {
     unsafe {
         xlib::XDefineCursor(_wm.display, _w, xlib::XCreateFontCursor(_wm.display, _c));
-    }
-}
-
-/**
- * Binds a input button to a window
- */
-fn bind_window_button(_wm: &WindowManager, _w: xlib::Window, _b: u32, _m: u32) {
-    unsafe {
-        xlib::XGrabButton(
-            _wm.display,
-            _b,
-            _m,
-            _w,
-            0,
-            xlib::ButtonPressMask as u32
-                | xlib::ButtonReleaseMask as u32
-                | xlib::ButtonMotionMask as u32,
-            xlib::GrabModeAsync,
-            xlib::GrabModeAsync,
-            0,
-            0,
-        );
-    }
-}
-
-/**
- * Binds a input key to a window
- */
-fn bind_window_key(_wm: &WindowManager, _w: xlib::Window, _k: u32, _m: u32) {
-    unsafe {
-        xlib::XGrabKey(
-            _wm.display,
-            xlib::XKeysymToKeycode(_wm.display, _k as u64) as i32,
-            _m,
-            _w,
-            0,
-            xlib::GrabModeAsync,
-            xlib::GrabModeAsync,
-        );
     }
 }
 
@@ -363,14 +325,17 @@ fn create_window_frame(_wm: &mut WindowManager, _w: xlib::Window, early: bool) {
             &mut attributes,
         );
 
-        bind_window_button(_wm, _w, xlib::Button1, 0);
-        bind_window_button(_wm, _w, xlib::Button1, xlib::Mod1Mask);
-        bind_window_button(_wm, _w, xlib::Button3, xlib::Mod1Mask);
-        bind_window_button(_wm, _w, xlib::Button3, 0);
-        bind_window_key(_wm, _w, keysym::XK_F4, xlib::Mod1Mask);
-        bind_window_key(_wm, _w, keysym::XK_Tab, xlib::Mod1Mask);
+        xlib::XSelectInput(
+            _wm.display,
+            _w,
+            xlib::KeyPressMask
+                | xlib::ButtonPressMask
+                | xlib::ButtonReleaseMask
+                | xlib::ButtonMotionMask,
+        );
 
         xlib::XAddToSaveSet(_wm.display, _w);
+
         xlib::XReparentWindow(
             _wm.display,
             _w,
@@ -378,9 +343,8 @@ fn create_window_frame(_wm: &mut WindowManager, _w: xlib::Window, early: bool) {
             DECORATION_PADDING,
             DECORATION_PADDING,
         );
-        xlib::XMapWindow(_wm.display, frame);
 
-        info!("Created frame: {}", _w);
+        xlib::XMapWindow(_wm.display, frame);
 
         let surface = cairo_sys::cairo_xlib_surface_create(
             _wm.display,
@@ -465,6 +429,10 @@ fn on_motion_notify(_wm: &WindowManager, _e: xlib::XMotionEvent) {
     }
 
     let win = _wm.windows.get(&_e.window).unwrap();
+    if _wm.active_window != win {
+        return;
+    }
+
     let position = Vector2D::new(_e.x_root, _e.y_root);
     let delta = position - _wm.drag_start;
 
@@ -551,18 +519,22 @@ fn on_button_press(_wm: &mut WindowManager, _e: xlib::XButtonEvent) {
         xlib::XRaiseWindow(_wm.display, win.frame);
     }
 
+    _wm.active_window = win;
     _wm.drag_start = Vector2D {
         x: _e.x_root,
         y: _e.y_root,
     };
-    win.drag_start = Vector2D { x: x, y: y };
-    win.drag_start_size = Vector2D { x: w, y: h };
+
+    win.drag_start = Vector2D::new(x, y);
+    win.drag_start_size = Vector2D::new(w, h);
 }
 
 /**
  * Handle button release event
  */
-fn on_button_release(_wm: &WindowManager, _e: xlib::XButtonEvent) {
+fn on_button_release(_wm: &mut WindowManager, _e: xlib::XButtonEvent) {
+    _wm.active_window = unsafe { uninitialized() };
+
     if !_wm.windows.contains_key(&_e.window) {
         return;
     }
@@ -575,6 +547,10 @@ fn on_button_release(_wm: &WindowManager, _e: xlib::XButtonEvent) {
  * Handle key press event
  */
 fn on_key_press(_wm: &mut WindowManager, _e: xlib::XKeyEvent) {
+    if !_wm.windows.contains_key(&_e.window) {
+        return;
+    }
+
     if _e.state & xlib::Mod1Mask > 0 {
         if _e.keycode == unsafe { xlib::XKeysymToKeycode(_wm.display, keysym::XK_F4 as u64) as u32 }
         {
@@ -673,7 +649,8 @@ fn main() {
         display: display,
         root: root,
         windows: HashMap::new(),
-        drag_start: Vector2D { x: 0, y: 0 },
+        drag_start: Vector2D::new(0, 0),
+        active_window: unsafe { uninitialized() },
     };
 
     reparent_initial_windows(&mut wm);
@@ -697,7 +674,7 @@ fn main() {
                 xlib::MapRequest => on_map_request(&mut wm, ev.map_request),
                 xlib::UnmapNotify => on_unmap_notify(&mut wm, ev.unmap),
                 xlib::ButtonPress => on_button_press(&mut wm, ev.button),
-                xlib::ButtonRelease => on_button_release(&wm, ev.button),
+                xlib::ButtonRelease => on_button_release(&mut wm, ev.button),
                 xlib::KeyPress => on_key_press(&mut wm, ev.key),
                 xlib::KeyRelease => on_key_release(&wm, ev.key),
                 xlib::Expose => on_expose(&wm, ev.expose),

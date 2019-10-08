@@ -250,25 +250,9 @@ fn draw_window_decoration(_wm: &WindowManager, _w: xlib::Window, _ctx: *mut cair
         cairo_sys::cairo_set_source_rgb(_ctx, 0.231, 0.25, 0.322);
         cairo_sys::cairo_paint(_ctx);
 
-        // Top
-        cairo_sys::cairo_move_to(_ctx, 0.0, 0.0);
-        cairo_sys::cairo_line_to(_ctx, attrs.width as f64, 0.0);
-
-        // Right
-        cairo_sys::cairo_move_to(_ctx, attrs.width as f64, 0.0);
-        cairo_sys::cairo_line_to(_ctx, attrs.width as f64, attrs.height as f64);
-
-        // Bottom
-        cairo_sys::cairo_move_to(_ctx, 0.0, attrs.height as f64);
-        cairo_sys::cairo_line_to(_ctx, attrs.width as f64, attrs.height as f64);
-
-        // Left
-        cairo_sys::cairo_move_to(_ctx, 0.0, 0.0);
-        cairo_sys::cairo_line_to(_ctx, 0.0, attrs.height as f64);
-
         cairo_sys::cairo_set_source_rgb(_ctx, 0.298, 0.337, 0.416);
-        cairo_sys::cairo_fill_preserve(_ctx);
         cairo_sys::cairo_set_line_width(_ctx, 5.0);
+        cairo_sys::cairo_rectangle(_ctx, 0.0, 0.0, attrs.width as f64, attrs.height as f64);
         cairo_sys::cairo_stroke(_ctx);
     }
 }

@@ -96,11 +96,41 @@ fn reparent_initial_windows(_wm: &mut WindowManager) {
 }
 
 /**
- * Sets the window cursor
+ * Binds a input button to a window
  */
-fn set_window_cursor(_wm: &WindowManager, _w: xlib::Window, _c: u32) {
+fn bind_window_button(_wm: &WindowManager, _w: xlib::Window, _b: u32, _m: u32, _c: u32) {
     unsafe {
-        xlib::XDefineCursor(_wm.display, _w, xlib::XCreateFontCursor(_wm.display, _c));
+        xlib::XGrabButton(
+            _wm.display,
+            _b,
+            _m,
+            _w,
+            0,
+            xlib::ButtonPressMask as u32
+                | xlib::ButtonReleaseMask as u32
+                | xlib::ButtonMotionMask as u32,
+            xlib::GrabModeAsync,
+            xlib::GrabModeAsync,
+            0,
+            xlib::XCreateFontCursor(_wm.display, _c),
+        );
+    }
+}
+
+/**
+ * Binds a input key to a window
+ */
+fn bind_window_key(_wm: &WindowManager, _w: xlib::Window, _k: u32, _m: u32) {
+    unsafe {
+        xlib::XGrabKey(
+            _wm.display,
+            xlib::XKeysymToKeycode(_wm.display, _k as u64) as i32,
+            _m,
+            _w,
+            0,
+            xlib::GrabModeAsync,
+            xlib::GrabModeAsync,
+        );
     }
 }
 
@@ -124,8 +154,6 @@ fn resize_window(_wm: &WindowManager, _w: xlib::Window, _win: &Window, delta: Ve
             height as i32,
         );
     }
-
-    set_window_cursor(_wm, _win.frame, XC_FLEUR);
 }
 
 /**
@@ -137,8 +165,6 @@ fn move_window(_wm: &WindowManager, _w: xlib::Window, _win: &Window, delta: Vect
     unsafe {
         xlib::XMoveWindow(_wm.display, _win.frame, new_position.x, new_position.y);
     }
-
-    set_window_cursor(_wm, _win.frame, XC_CROSSHAIR);
 }
 
 /**
@@ -318,14 +344,10 @@ fn create_window_frame(_wm: &mut WindowManager, _w: xlib::Window, early: bool) {
             &mut attributes,
         );
 
-        xlib::XSelectInput(
-            _wm.display,
-            _w,
-            xlib::KeyPressMask
-                | xlib::ButtonPressMask
-                | xlib::ButtonReleaseMask
-                | xlib::ButtonMotionMask,
-        );
+        bind_window_button(_wm, _w, xlib::Button1, xlib::Mod1Mask, XC_CROSSHAIR);
+        bind_window_button(_wm, _w, xlib::Button3, xlib::Mod1Mask, XC_FLEUR);
+        bind_window_key(_wm, _w, keysym::XK_F4, xlib::Mod1Mask);
+        bind_window_key(_wm, _w, keysym::XK_Tab, xlib::Mod1Mask);
 
         xlib::XAddToSaveSet(_wm.display, _w);
 
@@ -511,6 +533,7 @@ fn on_button_press(_wm: &mut WindowManager, _e: xlib::XButtonEvent) {
             &mut border,
             &mut depth,
         );
+
         xlib::XRaiseWindow(_wm.display, win.frame);
     }
 
@@ -529,13 +552,6 @@ fn on_button_press(_wm: &mut WindowManager, _e: xlib::XButtonEvent) {
  */
 fn on_button_release(_wm: &mut WindowManager, _e: xlib::XButtonEvent) {
     _wm.active_window = unsafe { uninitialized() };
-
-    if !_wm.windows.contains_key(&_e.window) {
-        return;
-    }
-
-    let win = _wm.windows.get(&_e.window).unwrap();
-    set_window_cursor(_wm, win.frame, XC_ARROW);
 }
 
 /**
@@ -663,7 +679,10 @@ fn main() {
     };
 
     reparent_initial_windows(&mut wm);
-    set_window_cursor(&wm, root, XC_ARROW);
+
+    unsafe {
+        xlib::XDefineCursor(display, root, xlib::XCreateFontCursor(display, XC_ARROW));
+    }
 
     info!("Starting event loop");
 

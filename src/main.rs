@@ -144,25 +144,35 @@ fn move_window(_wm: &WindowManager, _w: xlib::Window, _win: &Window, delta: Vect
 /**
  * Re-stacks window(s)
  */
-fn restack_window(_wm: &mut WindowManager, _w: xlib::Window) {
-    if !_wm.windows.contains_key(&_w) {
-        return;
-    }
+fn restack_windows(_wm: &mut WindowManager, _w: xlib::Window) {
+    unsafe {
+        let mut root: xlib::Window = uninitialized();
+        let mut parent: xlib::Window = uninitialized();
+        let mut windows: *mut xlib::Window = uninitialized();
+        let mut count: u32 = 0;
 
-    // FIXME There must be a better way
-    for val in _wm.windows.keys() {
-        if val != &_w {
-            let next = _wm.windows.get(val).unwrap();
-            unsafe {
-                xlib::XRaiseWindow(_wm.display, next.frame);
-                xlib::XSetInputFocus(
-                    _wm.display,
-                    next.frame,
-                    xlib::RevertToPointerRoot,
-                    xlib::CurrentTime,
-                );
+        if xlib::XQueryTree(
+            _wm.display,
+            _wm.root,
+            &mut root,
+            &mut parent,
+            &mut windows,
+            &mut count,
+        ) != 0
+        {
+            for _i in 0..count {
+                let next = *windows.offset(_i as isize);
+                if next != _w {
+                    xlib::XRaiseWindow(_wm.display, next);
+                    xlib::XSetInputFocus(
+                        _wm.display,
+                        next,
+                        xlib::RevertToPointerRoot,
+                        xlib::CurrentTime,
+                    );
+                    break;
+                }
             }
-            break;
         }
     }
 }
@@ -320,7 +330,7 @@ fn create_window_frame(_wm: &mut WindowManager, _w: xlib::Window, early: bool) {
             depth,
             xlib::InputOutput as u32,
             visual,
-            xlib::CWBorderPixel | xlib::CWEventMask /* | xlib::CWBackPixel */,
+            xlib::CWBorderPixel | xlib::CWEventMask, /* | xlib::CWBackPixel */
             &mut attributes,
         );
 
@@ -548,6 +558,15 @@ fn on_button_release(_wm: &mut WindowManager, _e: xlib::XButtonEvent) {
  * Handle key press event
  */
 fn on_key_press(_wm: &mut WindowManager, _e: xlib::XKeyEvent) {
+    if _e.window == _wm.root {
+        if _e.keycode
+            == unsafe { xlib::XKeysymToKeycode(_wm.display, keysym::XK_Tab as u64) as u32 }
+        {
+            restack_windows(_wm, _e.window);
+        }
+        return;
+    }
+
     if !_wm.windows.contains_key(&_e.window) {
         return;
     }
@@ -556,16 +575,10 @@ fn on_key_press(_wm: &mut WindowManager, _e: xlib::XKeyEvent) {
         if _e.keycode == unsafe { xlib::XKeysymToKeycode(_wm.display, keysym::XK_F4 as u64) as u32 }
         {
             kill_window(_wm, _e.window);
-        } else if _e.keycode
-            == unsafe { xlib::XKeysymToKeycode(_wm.display, keysym::XK_Tab as u64) as u32 }
-        {
-            restack_window(_wm, _e.window);
         }
     } else {
-        if _e.window != _wm.root {
-            unsafe {
-                xlib::XRaiseWindow(_wm.display, _e.window);
-            }
+        unsafe {
+            xlib::XRaiseWindow(_wm.display, _e.window);
         }
     }
 }
@@ -641,6 +654,17 @@ fn main() {
             root,
             xlib::SubstructureRedirectMask | xlib::SubstructureNotifyMask,
         );
+
+        xlib::XGrabKey(
+            display,
+            xlib::XKeysymToKeycode(display, keysym::XK_Tab as u64) as i32,
+            xlib::Mod1Mask,
+            root,
+            0,
+            xlib::GrabModeAsync,
+            xlib::GrabModeAsync,
+        );
+
         xlib::XSync(display, 0);
         xlib::XSetWindowBackground(display, root, 0x000000);
         xlib::XClearWindow(display, root);

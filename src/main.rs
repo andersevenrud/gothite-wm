@@ -233,7 +233,6 @@ fn kill_window(_wm: &mut WindowManager, _w: xlib::Window) {
  * Renders a window decoration
  */
 fn draw_window_decoration(_wm: &WindowManager, _w: xlib::Window, _ctx: *mut cairo_sys::cairo_t) {
-    // TODO: Solve flickering
     unsafe {
         let mut attrs: xlib::XWindowAttributes = uninitialized();
         xlib::XGetWindowAttributes(_wm.display, _w, &mut attrs);
@@ -305,8 +304,8 @@ fn create_window_frame(_wm: &mut WindowManager, _w: xlib::Window, early: bool) {
         let depth = xlib::XDefaultDepth(_wm.display, screen);
 
         let mut attributes: xlib::XSetWindowAttributes = uninitialized();
-        attributes.background_pixel = xlib::XBlackPixel(_wm.display, screen);
-        attributes.border_pixel = xlib::XBlackPixel(_wm.display, screen);
+        attributes.background_pixel = 0; //xlib::XBlackPixel(_wm.display, screen);
+        attributes.border_pixel = 0; //xlib::XBlackPixel(_wm.display, screen);
         attributes.event_mask =
             xlib::SubstructureRedirectMask | xlib::SubstructureNotifyMask | xlib::ExposureMask;
 
@@ -321,7 +320,7 @@ fn create_window_frame(_wm: &mut WindowManager, _w: xlib::Window, early: bool) {
             depth,
             xlib::InputOutput as u32,
             visual,
-            xlib::CWBackPixel | xlib::CWBorderPixel | xlib::CWEventMask,
+            xlib::CWBorderPixel | xlib::CWEventMask /* | xlib::CWBackPixel */,
             &mut attributes,
         );
 
@@ -641,8 +640,10 @@ fn main() {
             xlib::SubstructureRedirectMask | xlib::SubstructureNotifyMask,
         );
         xlib::XSync(display, 0);
+        /*
         xlib::XSetWindowBackground(display, root, 0x000000);
         xlib::XClearWindow(display, root);
+        */
     }
 
     let mut wm = WindowManager {

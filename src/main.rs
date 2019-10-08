@@ -247,7 +247,7 @@ fn draw_window_decoration(_wm: &WindowManager, _w: xlib::Window, _ctx: *mut cair
         let mut attrs: xlib::XWindowAttributes = uninitialized();
         xlib::XGetWindowAttributes(_wm.display, _w, &mut attrs);
 
-        cairo_sys::cairo_set_source_rgb(_ctx, 1.0, 1.0, 1.0);
+        cairo_sys::cairo_set_source_rgb(_ctx, 0.231, 0.25, 0.322);
         cairo_sys::cairo_paint(_ctx);
 
         // Top
@@ -266,7 +266,7 @@ fn draw_window_decoration(_wm: &WindowManager, _w: xlib::Window, _ctx: *mut cair
         cairo_sys::cairo_move_to(_ctx, 0.0, 0.0);
         cairo_sys::cairo_line_to(_ctx, 0.0, attrs.height as f64);
 
-        cairo_sys::cairo_set_source_rgb(_ctx, 0.0, 0.0, 1.0);
+        cairo_sys::cairo_set_source_rgb(_ctx, 0.298, 0.337, 0.416);
         cairo_sys::cairo_fill_preserve(_ctx);
         cairo_sys::cairo_set_line_width(_ctx, 5.0);
         cairo_sys::cairo_stroke(_ctx);
@@ -666,7 +666,7 @@ fn main() {
         );
 
         xlib::XSync(display, 0);
-        xlib::XSetWindowBackground(display, root, 0x000000);
+        xlib::XSetWindowBackground(display, root, 0x2E3440);
         xlib::XClearWindow(display, root);
     }
 
